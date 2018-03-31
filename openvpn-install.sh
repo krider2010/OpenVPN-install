@@ -2,7 +2,8 @@
 
 # Secure OpenVPN server installer for Debian, Ubuntu, CentOS and Arch Linux
 # https://github.com/Angristan/OpenVPN-install
-
+# The OpenVPN 2.4 is great, easy-rsa 3.0.4 is great, but I want to use ufw not iptables, so removing from the script and handling that manually
+# (using branch openvpn-2.4-update as the basis for the ufw branch)
 
 if [[ "$EUID" -ne 0 ]]; then
 	echo "Sorry, you need to run this as root"
@@ -23,7 +24,6 @@ if [[ -e /etc/debian_version ]]; then
 	OS="debian"
 	# Getting the version number, to verify that a recent version of OpenVPN is available
 	VERSION_ID=$(grep "VERSION_ID" /etc/os-release)
-	IPTABLES='/etc/iptables/iptables.rules'
 	SYSCTL='/etc/sysctl.conf'
 	if [[ "$VERSION_ID" != 'VERSION_ID="8"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="9"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="14.04"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="16.04"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="17.10"' ]]; then
 		echo "Your version of Debian/Ubuntu is not supported."
@@ -42,15 +42,12 @@ if [[ -e /etc/debian_version ]]; then
 	fi
 elif [[ -e /etc/fedora-release ]]; then
 	OS=fedora
-	IPTABLES='/etc/iptables/iptables.rules'
 	SYSCTL='/etc/sysctl.d/openvpn.conf'
 elif [[ -e /etc/centos-release || -e /etc/redhat-release || -e /etc/system-release ]]; then
 	OS=centos
-	IPTABLES='/etc/iptables/iptables.rules'
 	SYSCTL='/etc/sysctl.conf'
 elif [[ -e /etc/arch-release ]]; then
 	OS=arch
-	IPTABLES='/etc/iptables/iptables.rules'
 	SYSCTL='/etc/sysctl.d/openvpn.conf'
 else
 	echo "Looks like you aren't running this installer on a Debian, Ubuntu, CentOS or ArchLinux system"
@@ -103,7 +100,7 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 	while :
 	do
 	clear
-		echo "OpenVPN-install (github.com/Angristan/OpenVPN-install)"
+		echo "OpenVPN-install (github.com/krider2010/OpenVPN-install)"
 		echo ""
 		echo "Looks like OpenVPN is already installed"
 		echo ""
@@ -161,32 +158,6 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 			echo ""
 			read -p "Do you really want to remove OpenVPN? [y/n]: " -e -i n REMOVE
 			if [[ "$REMOVE" = 'y' ]]; then
-				PORT=$(grep '^port ' /etc/openvpn/server.conf | cut -d " " -f 2)
-				if pgrep firewalld; then
-					# Using both permanent and not permanent rules to avoid a firewalld reload.
-					firewall-cmd --zone=public --remove-port=$PORT/udp
-					firewall-cmd --zone=trusted --remove-source=10.8.0.0/24
-					firewall-cmd --permanent --zone=public --remove-port=$PORT/udp
-					firewall-cmd --permanent --zone=trusted --remove-source=10.8.0.0/24
-				fi
-				if iptables -L -n | grep -qE 'REJECT|DROP'; then
-					if [[ "$PROTOCOL" = 'udp' ]]; then
-						iptables -D INPUT -p udp --dport $PORT -j ACCEPT
-					else
-						iptables -D INPUT -p tcp --dport $PORT -j ACCEPT
-					fi
-					iptables -D FORWARD -s 10.8.0.0/24 -j ACCEPT
-					iptables-save > $IPTABLES
-				fi
-				iptables -t nat -D POSTROUTING -o $NIC -s 10.8.0.0/24 -j MASQUERADE
-				iptables-save > $IPTABLES
-				if hash sestatus 2>/dev/null; then
-					if sestatus | grep "Current mode" | grep -qs "enforcing"; then
-						if [[ "$PORT" != '1194' ]]; then
-							semanage port -d -t openvpn_port_t -p udp $PORT
-						fi
-					fi
-				fi
 				if [[ "$OS" = 'debian' ]]; then
 					apt-get autoremove --purge -y openvpn
 				elif [[ "$OS" = 'arch' ]]; then
@@ -247,8 +218,9 @@ else
 	echo "   6) Google (Anycast: worldwide)"
 	echo "   7) Yandex Basic (Russia)"
 	echo "   8) AdGuard DNS (Russia)"
-	while [[ $DNS != "1" && $DNS != "2" && $DNS != "3" && $DNS != "4" && $DNS != "5" && $DNS != "6" && $DNS != "7" && $DNS != "8" ]]; do
-		read -p "DNS [1-8]: " -e -i 1 DNS
+	echo "   9) Don't send DNS via the VPN (only do this if you know you want to do this!)
+	while [[ $DNS != "1" && $DNS != "2" && $DNS != "3" && $DNS != "4" && $DNS != "5" && $DNS != "6" && $DNS != "7" && $DNS != "8" && $DNS != "9" ]]; do
+		read -p "DNS [1-9]: " -e -i 1 DNS
 	done
 	echo ""
 	echo "Choose which compression algorithm you want to use:"
@@ -270,7 +242,7 @@ else
 		;;
 	esac
 	echo ""
-	echo "See https://github.com/Angristan/OpenVPN-install#encryption to learn more about "
+	echo "See https://github.com/krider2010/OpenVPN-install#encryption to learn more about "
 	echo "the encryption in OpenVPN and the choices proposed in this script."
 	echo "Please note that all the choices proposed are secure enough considering today's strandards, unlike some default OpenVPN options"
 	echo "You can just type "enter" if you don't know what to choose."
@@ -529,77 +501,12 @@ else
 		# Ubuntu >= 17.04 and Debian > 9 have OpenVPN 2.4 without the need of a third party repository.
 		# The we install OpenVPN
 		apt-get update
-		apt-get install openvpn iptables openssl wget ca-certificates curl -y
-		# Install iptables service
-		if [[ ! -e /etc/systemd/system/iptables.service ]]; then
-			mkdir /etc/iptables
-			iptables-save > /etc/iptables/iptables.rules
-			echo "#!/bin/sh
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
-iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT" > /etc/iptables/flush-iptables.sh
-			chmod +x /etc/iptables/flush-iptables.sh
-			echo "[Unit]
-Description=Packet Filtering Framework
-DefaultDependencies=no
-Before=network-pre.target
-Wants=network-pre.target
-[Service]
-Type=oneshot
-ExecStart=/sbin/iptables-restore /etc/iptables/iptables.rules
-ExecReload=/sbin/iptables-restore /etc/iptables/iptables.rules
-ExecStop=/etc/iptables/flush-iptables.sh
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target" > /etc/systemd/system/iptables.service
-			systemctl daemon-reload
-			systemctl enable iptables.service
-		fi
+		apt-get install openvpn openssl wget ca-certificates curl -y
 	elif [[ "$OS" = 'centos' || "$OS" = 'fedora' ]]; then
 		if [[ "$OS" = 'centos' ]]; then
 			yum install epel-release -y
 		fi
-		yum install openvpn iptables openssl wget ca-certificates curl -y
-		# Install iptables service
-		if [[ ! -e /etc/systemd/system/iptables.service ]]; then
-			mkdir /etc/iptables
-			iptables-save > /etc/iptables/iptables.rules
-			echo "#!/bin/sh
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
-iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT" > /etc/iptables/flush-iptables.sh
-			chmod +x /etc/iptables/flush-iptables.sh
-			echo "[Unit]
-Description=Packet Filtering Framework
-DefaultDependencies=no
-Before=network-pre.target
-Wants=network-pre.target
-[Service]
-Type=oneshot
-ExecStart=/sbin/iptables-restore /etc/iptables/iptables.rules
-ExecReload=/sbin/iptables-restore /etc/iptables/iptables.rules
-ExecStop=/etc/iptables/flush-iptables.sh
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target" > /etc/systemd/system/iptables.service
-			systemctl daemon-reload
-			systemctl enable iptables.service
-			# Disable firewalld to allow iptables to start upon reboot
-			systemctl disable firewalld
-			systemctl mask firewalld
-		fi
+		yum install openvpn openssl wget ca-certificates curl -y
 	else
 		# Else, the distro is ArchLinux
 		echo ""
@@ -618,11 +525,8 @@ WantedBy=multi-user.target" > /etc/systemd/system/iptables.service
 
 		if [[ "$OS" = 'arch' ]]; then
 			# Install dependencies
-			pacman -Syu openvpn iptables openssl wget ca-certificates curl --needed --noconfirm
-			iptables-save > /etc/iptables/iptables.rules # iptables won't start if this file does not exist
+			pacman -Syu openvpn openssl wget ca-certificates curl --needed --noconfirm
 			systemctl daemon-reload
-			systemctl enable iptables
-			systemctl start iptables
 		fi
 	fi
 
@@ -706,36 +610,45 @@ ifconfig-pool-persist ipp.txt" >> /etc/openvpn/server.conf
 		grep -v '#' /etc/resolv.conf | grep 'nameserver' | grep -E -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | while read line; do
 			echo "push \"dhcp-option DNS $line\"" >> /etc/openvpn/server.conf
 		done
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		2) #Quad9
 		echo 'push "dhcp-option DNS 9.9.9.9"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		3) #FDN
 		echo 'push "dhcp-option DNS 80.67.169.40"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 80.67.169.12"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		4) #DNS.WATCH
 		echo 'push "dhcp-option DNS 84.200.69.80"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 84.200.70.40"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		5) #OpenDNS
 		echo 'push "dhcp-option DNS 208.67.222.222"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 208.67.220.220"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		6) #Google
 		echo 'push "dhcp-option DNS 8.8.8.8"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 8.8.4.4"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		7) #Yandex Basic
 		echo 'push "dhcp-option DNS 77.88.8.8"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 77.88.8.1"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 		;;
 		8) #AdGuard DNS
 		echo 'push "dhcp-option DNS 176.103.130.130"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 176.103.130.131"' >> /etc/openvpn/server.conf
+		echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
+		;;
+		9) # Don't send DNS via the VPN
 		;;
 	esac
-echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 echo "crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
@@ -777,43 +690,6 @@ verb 3" >> /etc/openvpn/server.conf
 	fi
 	# Avoid an unneeded reboot
 	echo 1 > /proc/sys/net/ipv4/ip_forward
-	# Set NAT for the VPN subnet
-	iptables -t nat -A POSTROUTING -o $NIC -s 10.8.0.0/24 -j MASQUERADE
-	# Save persitent iptables rules
-	iptables-save > $IPTABLES
-	if pgrep firewalld; then
-		# We don't use --add-service=openvpn because that would only work with
-		# the default port. Using both permanent and not permanent rules to
-		# avoid a firewalld reload.
-		if [[ "$PROTOCOL" = '1' ]]; then
-			firewall-cmd --zone=public --add-port=$PORT/udp
-			firewall-cmd --permanent --zone=public --add-port=$PORT/udp
-		elif [[ "$PROTOCOL" = '2' ]]; then
-			firewall-cmd --zone=public --add-port=$PORT/tcp
-			firewall-cmd --permanent --zone=public --add-port=$PORT/tcp
-		fi
-		firewall-cmd --zone=trusted --add-source=10.8.0.0/24
-		firewall-cmd --permanent --zone=trusted --add-source=10.8.0.0/24
-	fi
-	if iptables -L -n | grep -qE 'REJECT|DROP'; then
-		# If iptables has at least one REJECT rule, we asume this is needed.
-		# Not the best approach but I can't think of other and this shouldn't
-		# cause problems.
-		if [[ "$PROTOCOL" = '1' ]]; then
-			iptables -I INPUT -p udp --dport $PORT -j ACCEPT
-		elif [[ "$PROTOCOL" = '2' ]]; then
-			iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
-		fi
-		iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT
-		iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
-		if [[ "$PROTOCOL" = '1' ]]; then
-			sed -i "1 a\iptables -I INPUT -p udp --dport $PORT -j ACCEPT" $RCLOCAL
-		elif [[ "$PROTOCOL" = '2' ]]; then
-			sed -i "1 a\iptables -I INPUT -p tcp --dport $PORT -j ACCEPT" $RCLOCAL
-		fi
-		sed -i "1 a\iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT" $RCLOCAL
-		sed -i "1 a\iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT" $RCLOCAL
-	fi
 	# If SELinux is enabled and a custom port was selected, we need this
 	if hash sestatus 2>/dev/null; then
 		if sestatus | grep "Current mode" | grep -qs "enforcing"; then
