@@ -218,7 +218,7 @@ else
 	echo "   6) Google (Anycast: worldwide)"
 	echo "   7) Yandex Basic (Russia)"
 	echo "   8) AdGuard DNS (Russia)"
-	echo "   9) Don't send DNS via the VPN (only do this if you know you want to do this!)
+	echo "   9) Don't send DNS via the VPN (only do this if you know you want to do this)"
 	while [[ $DNS != "1" && $DNS != "2" && $DNS != "3" && $DNS != "4" && $DNS != "5" && $DNS != "6" && $DNS != "7" && $DNS != "8" && $DNS != "9" ]]; do
 		read -p "DNS [1-9]: " -e -i 1 DNS
 	done
