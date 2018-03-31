@@ -779,7 +779,7 @@ if [[ $COMPRESSION == "lz4" || $COMPRESSION == "lzo"  ]]; then
 fi
 
 if [[ $DNS != "9" ]]; then
-	echo "setenv opt block-outside-dns >> /etc/openvpn/client-template.txt
+	echo "setenv opt block-outside-dns" >> /etc/openvpn/client-template.txt
 fi
 
 echo "verb 3" >> /etc/openvpn/client-template.txt
