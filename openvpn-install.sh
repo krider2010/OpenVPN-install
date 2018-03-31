@@ -778,8 +778,11 @@ if [[ $COMPRESSION == "lz4" || $COMPRESSION == "lzo"  ]]; then
 	echo "compress $COMPRESSION" >> /etc/openvpn/client-template.txt
 fi
 
-echo "setenv opt block-outside-dns
-verb 3" >> /etc/openvpn/client-template.txt
+if [[ $DNS != "9" ]]; then
+	echo "setenv opt block-outside-dns >> /etc/openvpn/client-template.txt
+fi
+
+echo "verb 3" >> /etc/openvpn/client-template.txt
 
 	# Generate the custom client.ovpn
 	newclient "$CLIENT"
